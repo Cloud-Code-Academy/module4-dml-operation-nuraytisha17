@@ -325,12 +325,8 @@ public with sharing class DMLOperations {
 
     /**
      * Question 11
-        // Upsert the valid Contacts with error handling
-        try {
-            upsert validContactsToUpsert;
-        } catch (DmlException e) {
-            System.debug('Error during upsert operation: ' + e.getMessage());
-        }
+     * Insert a list of Leads and then deletes them.
+     * @param leadNames The list of Lead names to be inserted.
      */
     public static void insertAndDeleteLeads(List<String> leadNames) {
         //Store the list of Leads to insert
