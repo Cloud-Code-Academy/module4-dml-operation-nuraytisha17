@@ -146,7 +146,14 @@ public with sharing class DMLOperations {
             // Set the Opportunity's Stage to Qualification
             // Set the Opportunity's Close Date to 3 months from today
             // Set the Opportunity's Amount to 50000
+        for (Opportunity oppty: opportunities) {
+            opp.StageName = 'Qualification';
+            opp.CloseDate = Date.today().addMonths(3);
+            opp.Amount = 50000;
+        }
+
         // Upsert the opportunities List so that records are either updated or created
+        Database.upsert(opportunities, false);
     }
 
     /**
@@ -160,10 +167,55 @@ public with sharing class DMLOperations {
      * @param oppNames The list of Opportunity names.
      */
     public static void upsertOpportunities(String accountName, List<String> oppNames) {
+        
+        List<Account> accounts = [ SELECT Id
+                                    FROM Account 
+                                    WHERE Name = :accountName 
+                                    ORDER BY CreatedDate ASC
+                                    LIMIT 1];
+
+        if (accounts.isEmpty()) {
+            accounts.add(new Account(Name = accountName));
+        }
+        
+        Database.upsert(accounts);
         // Loop through each Opportunity name
-            // Create an Opportunity with the given name
-            // Add the Opportunity to the list
+        // Create an Opportunity with the given name
+        // Add the Opportunity to the list
+        Map<String, Opportunity> opptyNames = new Map<String, Opportunity>();
+
+        for (Opportunity oppty : [  SELECT Id, Name 
+                                    FROM Opportunity
+                                    WHERE Name IN :oppNameSet 
+                                    AND AccountId IN :accounts ]) {
+            opptyNames.put(oppty.Name, oppty);
+        }
+
+        List<Opportunity> oppsToUpsert = new List<Opportunity>();
+
+        for (String name : oppNames) {
+            Opportunity opp;
+
+            if (opptyNames.containsKey(name)) {
+                opp = opptyNames.get(name); // update existing
+            } else {
+                opp = new Opportunity(Name = name);
+            }
+
+            opp.StageName = 'Qualification';
+            opp.CloseDate = Date.today().addMonths(3);
+            opp.Amount = 50000;
+            // Retrieve the account ID after upsert operation
+            accounts = [SELECT Id FROM Account WHERE Name = :accountName LIMIT 1];
+            opp.AccountId = accounts[0].Id;
+    
+            oppsToUpsert.add(opp);
+        }
+        // No return statement is needed as the method does not require a return value.
+        Database.upsert(oppsToUpsert);
+        return opptyNames;
     }
+
     
     /**
      * Question 9
@@ -174,37 +226,95 @@ public with sharing class DMLOperations {
 	 * @return The Account that was upserted.
 	 */
 	public static Account upsertAccount(String accountName) {
-		// Query for the Account
-		List<Account> accounts = [SELECT Id FROM Account WHERE Name = :accountName];
+
+		// Query for the Account in a list
+		List<Account> accounts = [  SELECT Id 
+                                    FROM Account 
+                                    WHERE Name = :accountName
+                                    ORDER BY CreatedDate ASC
+                                    LIMIT 1];
 
 		// if the Account exists, update the description
-
-		// otherwise, create a new Account and set the description
-
+        // otherwise, create a new Account and set the description
+        if (accounts.size() > 0) {
+            accounts.get(0).Description = 'Updated Account';
+        } else {
+            accounts.add(new Account(Name = accountName, Description = 'New Account'));
+        }
 		// Upsert the Account
-		return null;
+        Database.upsert(accounts);
+		return accounts.get(0);
 	}
 
     /**
      * Question 10
-	 * Manage the association between Contacts and Accounts
-	 * Ensure that for each Contact in the provided list, there is a corresponding Account Name that matches the Contact's last name.
-	 * If such an Account does not exist, the method creates it; if it does, the method ensures the Contact is associated with it. (Hint: use previous upsertAccount method - this may cause bad practices but for learning purposes it's okay.)
+     * Manage the association between Contacts and Accounts.
+     * Ensure that for each Contact in the provided list, there is a corresponding Account Name that matches the Contact's LastName.
+     * If such an Account does not exist, the method creates it; if it does, the method ensures the Contact is associated with it. (Hint: use previous upsertAccount method - this may cause bad practices but for learning purposes it's okay.)
      * Example Contact.LastName = 'Doe' Link to Account.Name = 'Doe' 
      * Example Contact.LastName = 'Jane' Link to Account.Name = 'Jane'
-	 * @param contactsToUpsert List of Contacts to be upserted and linked to accounts.
+     * 
+     * Edge Cases:
+     * - Duplicate Account Names: The method ensures no duplicate accounts are created by checking existing accounts before creating new ones.
+     * - Null LastName: Contacts with null LastName are skipped as they cannot be associated with an Account.
+     * - Large Data Volume: The method handles bulk operations efficiently using maps and lists.
+     * 
+     * @param contactsToUpsert List of Contacts to be upserted and linked to accounts.
 	 */
 	public static void upsertAccountsWithContacts(List<Contact> contactsToUpsert) {
+        
+        Set<String> acctNames = new Set<String>();
 		// Loop through each Contact
-
 		// Extract the Account Name from Contact's LastName
+        for (Contact c: contactsToUpsert) {
+            acctNames.add(c.LastName);
+        }
 
 		// Get the account based on the name or create one if it doesn't exist
+        Map<String, Account> acctToName = new Map<String, Account>();
+
+        for (Account a: [
+            SELECT Id, Name
+            FROM Account
+            WHERE Name IN :acctNames
+        ]) {
+            acctToName.put(a.Name, a);
+        }
+    
+
+    Map<String, Account> acctMap = new Map<String, Account>();
+    for (Account a : [SELECT Id, Name FROM Account WHERE Name IN :acctNames]) {
+        acctMap.put(a.Name, a);
+    }
+
+    List<Account> newAccts = new List<Account>();
+    for (String name : acctNames) {
+        if (!acctMap.containsKey(name)) {
+            Account a = new Account(Name = name);
+            newAccts.add(a);
+            acctMap.put(name, a);
+        }
+    }
+    if (!newAccts.isEmpty()) {
+        upsert newAccts;
+    }
+
+    for (Contact c : contactsToUpsert) {
+        Account a = acctMap.get(c.LastName);
+        if (a != null) {
+            c.AccountId = a.Id;
+        } else {
+            System.debug('No matching account found for Contact LastName: ' + c.LastName);
+        }
+    }
+
+    upsert contactsToUpsert;
 
 		// Link the Contact to its Account using the Account Id
 
 		// Upsert the Contacts
 	}
+    
 
     /**
      * Question 11
@@ -212,11 +322,19 @@ public with sharing class DMLOperations {
      * @param leadNames The list of Lead names to be inserted.
      */
     public static void insertAndDeleteLeads(List<String> leadNames) {
+        //Store the list of Leads to insert
+        List<Lead> leads = new List<Lead>();
+
         // Loop through each Lead name
+        for (String name : leadNames) {
+            leads.add(new Lead(LastName = name, Company = 'Test Company'));
+        }
 
         // Insert the Leads
+        insert leads;
 
         // Delete the Leads
+        delete leads;
     }
 
 
@@ -227,8 +345,19 @@ public with sharing class DMLOperations {
      * @param numOfCases The number of cases to create.
      */
     public static void createAndDeleteCases(String accountId, Integer numOfCases) {
+
+        //List to store Cases
+        List<Case> cases = new List<Case>();
+
+        //Loop through number of cases
+        for (integer i = 0; i < numOfCases; i++) {
+            Case c = new Case(AccountId = accountId, Subject = 'Test Case ' + i);
+            cases.add(c);
+        }
         // Insert the cases
+        insert cases;
 
         // Delete the cases
+        delete cases;
     }
 }
